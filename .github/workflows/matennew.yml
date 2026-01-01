@@ -1,0 +1,237 @@
+name: Fast Code Base64  Win 10 NeW
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deployment:
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    env:
+      # ====================================================
+      # إعدادات المستخدم
+      # ====================================================
+      aa2: "XCDOOD"
+      aa3: "Zxxz4444"
+
+      # ====================================================
+      # خيار المفتاح (1 أو 2)
+      # 1 = سيقوم باختيار key1.txt
+      # 2 = سيقوم باختيار key2.txt
+      # ====================================================
+      KEY_CHOICE: "2"
+
+      # ====================================================
+      # 1. رابط حزمة البرامج + المفاتيح (Dropbox -> TinyURL)
+      # يحتوي على: Tailscale, RustDesk, NST, key1.txt, key2.txt
+      # ====================================================
+      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"
+
+      # ====================================================
+      # 2. رابط الملفات المهمة (Payload)
+      # ====================================================
+      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ====================================================
+      # الخطوة 1: إعداد RDP والمستخدمين
+      # ====================================================
+      - name: Setup RDP & Users
+        shell: pwsh
+        run: |
+          Write-Host "==== 1. CONFIGURING RDP & FIREWALL (Win 2022) ===="
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Value 0 -Force
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name SecurityLayer -Value 0 -Force
+          
+          netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
+          
+          Write-Host "==== 2. SETTING UP USERS ===="
+          $User = $env:aa2
+          $Pass = $env:aa3
+          $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
+          
+          $current = $env:USERNAME
+          Set-LocalUser -Name $current -Password $Secure
+          
+          if ($current -ne "runneradmin") {
+              $r = Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue
+              if ($r) { Set-LocalUser -Name "runneradmin" -Password $Secure }
+          }
+          
+          $u = Get-LocalUser -Name $User -ErrorAction SilentlyContinue
+          if (-not $u) {
+              New-LocalUser -Name $User -Password $Secure -FullName $User -AccountNeverExpires
+              Add-LocalGroupMember Administrators $User
+              Add-LocalGroupMember "Remote Desktop Users" $User
+          } else {
+              Set-LocalUser -Name $User -Password $Secure
+          }
+
+      # ====================================================
+      # الخطوة 2: تحميل الحزمة واختيار المفتاح وتثبيت Tailscale
+      # ====================================================
+      - name: Download Bundle & Install Tailscale
+        shell: pwsh
+        run: |
+          Write-Host "==== 3. DOWNLOADING APP BUNDLE ===="
+          $TempDir = Join-Path $env:TEMP 'AppBundle'
+          New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
+          
+          $BundleZip = Join-Path $TempDir 'bundle.zip'
+          
+          try { 
+              Invoke-WebRequest -Uri $env:APP_BUNDLE_URL -OutFile $BundleZip -UseBasicParsing -TimeoutSec 600
+          } catch {
+              Write-Error "Failed to download App Bundle."
+              exit 1
+          }
+          
+          Write-Host "Extracting Bundle..."
+          $ExtractDir = Join-Path $TempDir 'Extracted'
+          Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
+          
+          # ==========================================
+          # أ) اختيار المفتاح بناءً على المتغير
+          # ==========================================
+          $KeyName = "key$($env:KEY_CHOICE).txt"
+          Write-Host "Searching for selected key file: $KeyName ..."
+          
+          $KeyFile = Get-ChildItem -Path $ExtractDir -Filter $KeyName -Recurse | Select-Object -First 1
+          
+          if (-not $KeyFile) {
+              Write-Error "File '$KeyName' not found in the zip file! Please check the zip content or KEY_CHOICE."
+              exit 1
+          }
+          
+          # قراءة وفك التشفير
+          try {
+              $Encoded = Get-Content $KeyFile.FullName -Raw
+              $Encoded = $Encoded.Trim()
+              
+              $Bytes = [System.Convert]::FromBase64String($Encoded)
+              $RealKey = [System.Text.Encoding]::UTF8.GetString($Bytes).Trim()
+              
+              $Masked = $RealKey.Substring($RealKey.Length - 5)
+              Write-Host "Key ($KeyName) Decoded successfully. Ends with: ...$Masked"
+          } catch {
+              Write-Error "Failed to decode the key. Ensure it is valid Base64."
+              exit 1
+          }
+
+          # ==========================================
+          # ب) تثبيت Tailscale
+          # ==========================================
+          Write-Host "Searching for Tailscale installer..."
+          $TsInstaller = Get-ChildItem -Path $ExtractDir -Include "*tailscale*.msi","*tailscale*.exe" -Recurse | Select-Object -First 1
+          
+          if ($TsInstaller) {
+              Write-Host "Installing Tailscale..."
+              if ($TsInstaller.Extension -eq ".msi") {
+                  Start-Process msiexec.exe -ArgumentList '/i', $TsInstaller.FullName, '/quiet', '/norestart' -Wait
+              } else {
+                  Start-Process $TsInstaller.FullName -ArgumentList '/quiet', '/norestart' -Wait
+              }
+          } else {
+              Write-Error "Tailscale installer not found!"
+              exit 1
+          }
+
+          # الاتصال
+          $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
+          $HostName = "RDP-Win11-$env:GITHUB_RUN_NUMBER"
+          
+          Write-Host "Connecting Tailscale..."
+          $p = Start-Process -FilePath $TsExe -ArgumentList "up --authkey=$RealKey --hostname=$HostName --timeout=20s" -Wait -NoNewWindow -PassThru
+          
+          if ($p.ExitCode -eq 0) {
+              $ip = & $TsExe ip -4 2>$null
+              Write-Host "SUCCESS! IP: $ip" -ForegroundColor Green
+          } else {
+              Write-Error "Tailscale Connection Failed."
+              exit 1
+          }
+
+      # ====================================================
+      # الخطوة 3: الترتيب الجديد (Rust -> Extract Zip -> NST)
+      # ====================================================
+      - name: Install Apps (Ordered)
+        shell: pwsh
+        run: |
+          $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
+          
+          # ==========================================
+          # 1. تثبيت RustDesk (الأول)
+          # ==========================================
+          Write-Host "==== 1/3 INSTALLING RUSTDESK ===="
+          $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
+          
+          if ($RustInstaller) {
+              Write-Host "Installing RustDesk..."
+              Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow
+              Start-Sleep -Seconds 5
+          } else {
+              Write-Warning "RustDesk installer not found."
+          }
+          
+          # ==========================================
+          # 2. تحميل واستخراج الملفات المهمة (الثاني)
+          # ==========================================
+          Write-Host "==== 2/3 EXTRACTING PAYLOAD ZIP ===="
+          $PayloadZip = Join-Path $env:TEMP 'payload.zip'
+          
+          try {
+              Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing -TimeoutSec 600
+              
+              $User = $env:aa2
+              $profiles = @($env:USERPROFILE)
+              $targetProfile = "C:\Users\$User"
+              if (Test-Path $targetProfile) { $profiles += $targetProfile }
+              
+              foreach ($p in $profiles) {
+                  $dLoads = Join-Path $p 'Downloads'
+                  $dDesk = Join-Path $p 'Desktop'
+                  foreach ($loc in @($dLoads, $dDesk)) { 
+                      try { 
+                          New-Item -ItemType Directory -Path $loc -Force | Out-Null
+                          Expand-Archive -Path $PayloadZip -DestinationPath $loc -Force 
+                          Write-Host "Extracted to: $loc"
+                      } catch {} 
+                  }
+              }
+          } catch {
+              Write-Warning "Failed to download/extract payload zip."
+          }
+
+          # ==========================================
+          # 3. تثبيت NST Browser (الأخير)
+          # ==========================================
+          Write-Host "==== 3/3 INSTALLING NST BROWSER ===="
+          $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
+          
+          if ($NstInstaller) {
+              Write-Host "Installing NST..."
+              $args = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/S")
+              Start-Process -FilePath $NstInstaller.FullName -ArgumentList $args -NoNewWindow -Wait
+          } else {
+              Write-Warning "NST Browser installer not found."
+          }
+
+      # ====================================================
+      # الخطوة 4: إبقاء الجلسة تعمل
+      # ====================================================
+      - name: Keep Session Alive
+        shell: pwsh
+        run: |
+          $KeepAliveMinutes = 350
+          Write-Host "==== SESSION STARTED: $KeepAliveMinutes Minutes ===="
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          while ($sw.Elapsed.TotalMinutes -lt $KeepAliveMinutes) {
+            $left = [math]::Round($KeepAliveMinutes - $sw.Elapsed.TotalMinutes)
+            Write-Host "Alive - $left minutes remaining..."
+            Start-Sleep -Seconds 60
+          }
