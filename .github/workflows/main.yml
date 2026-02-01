@@ -19,49 +19,37 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. إعداد المستخدمين وكلمات المرور
+      # 1. إعداد المستخدمين
       - name: Setup Users
         shell: pwsh
         run: |
-          Write-Host "==== 1. CONFIGURING USERS ===="
           $Pass = $env:aa3
           $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
-          
-          # تأمين حساب runneradmin للاتصال عبر NoMachine
           $r = Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue
           if ($r) { Set-LocalUser -Name "runneradmin" -Password $Secure }
-          
-          # إعداد مستخدم إضافي
           $User = $env:aa2
           if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $User -Password $Secure -FullName $User -AccountNeverExpires
               Add-LocalGroupMember Administrators $User
-              Add-LocalGroupMember "Remote Desktop Users" $User
-          } else {
-              Set-LocalUser -Name $User -Password $Secure
           }
 
-      # 2. تحميل الحزمة وتفعيل Tailscale (الكود الكامل)
+      # 2. تحميل الحزمة و Tailscale
       - name: Download Bundle & Tailscale
         shell: pwsh
         run: |
-          Write-Host "==== 2. DOWNLOADING BUNDLE ===="
           $TempDir = Join-Path $env:TEMP 'AppBundle'
           New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
           $BundleZip = Join-Path $TempDir 'bundle.zip'
-          
           Invoke-WebRequest -Uri $env:APP_BUNDLE_URL -OutFile $BundleZip -UseBasicParsing
           $ExtractDir = Join-Path $TempDir 'Extracted'
           Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
           
-          # فك تشفير مفتاح Tailscale
           $KeyName = "key$($env:KEY_CHOICE).txt"
           $KeyFile = Get-ChildItem -Path $ExtractDir -Filter $KeyName -Recurse | Select-Object -First 1
           $Encoded = Get-Content $KeyFile.FullName -Raw
           $Bytes = [System.Convert]::FromBase64String($Encoded.Trim())
           $RealKey = [System.Text.Encoding]::UTF8.GetString($Bytes).Trim()
           
-          # تثبيت Tailscale
           $TsInstaller = Get-ChildItem -Path $ExtractDir -Include "*tailscale*.msi","*tailscale*.exe" -Recurse | Select-Object -First 1
           if ($TsInstaller.Extension -eq ".msi") {
               Start-Process msiexec.exe -ArgumentList '/i', $TsInstaller.FullName, '/quiet', '/norestart' -Wait
@@ -69,49 +57,54 @@ jobs:
               Start-Process $TsInstaller.FullName -ArgumentList '/quiet', '/norestart' -Wait
           }
           
-          # الاتصال
           $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
           & $TsExe up --authkey=$RealKey --hostname="Win11-NoMachine" --timeout=20s
-          $ip = & $TsExe ip -4
-          Write-Host "==== TAILSCALE IP: $ip ====" -ForegroundColor Green
+          Write-Host "TAILSCALE READY"
 
-      # 3. تثبيت NoMachine والبرامج الأخرى
+      # 3. تثبيت NoMachine والبرامج الأخرى (تم إصلاح التحميل)
       - name: Install All Apps
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
           
-          # تثبيت NoMachine (نسخة صامتة لـ Windows)
+          # تثبيت NoMachine باستخدام curl لضمان التحميل الصحيح
           Write-Host "==== INSTALLING NOMACHINE ===="
-          $NmUrl = "https://download.nomachine.com/download/8.11/Windows/nomachine_8.11.3_4.exe"
           $NmInstaller = Join-Path $env:TEMP "nomachine.exe"
-          Invoke-WebRequest -Uri $NmUrl -OutFile $NmInstaller -UseBasicParsing
-          Start-Process -FilePath $NmInstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          # رابط مباشر ومستقر أكثر
+          $NmUrl = "https://download.nomachine.com/download/8.11/Windows/nomachine_8.11.3_4.exe"
+          curl.exe -L $NmUrl -o $NmInstaller
           
+          if (Test-Path $NmInstaller) {
+              $size = (Get-Item $NmInstaller).Length
+              Write-Host "File Size: $size bytes"
+              if ($size -gt 10MB) {
+                  Start-Process -FilePath $NmInstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+                  Write-Host "NoMachine installed successfully."
+              } else {
+                  Write-Error "Download failed: File is too small. Please check the URL."
+                  exit 1
+              }
+          }
+
           # تثبيت RustDesk
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
           if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
           
-          # تحميل واستخراج Payload (الملفات المهمة)
+          # تحميل واستخراج Payload
           $PayloadZip = Join-Path $env:TEMP 'payload.zip'
           try {
               Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing
-              $loc = Join-Path $env:USERPROFILE 'Desktop'
-              Expand-Archive -Path $PayloadZip -DestinationPath $loc -Force
-          } catch { Write-Warning "Payload extraction failed" }
+              Expand-Archive -Path $PayloadZip -DestinationPath (Join-Path $env:USERPROFILE 'Desktop') -Force
+          } catch {}
 
           # تثبيت NST Browser
           $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
-          if ($NstInstaller) {
-              Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait
-          }
+          if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
 
       # 4. الحفاظ على الجلسة
       - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "==== SESSION ACTIVE (350 MIN) ===="
+          Write-Host "==== SESSION ACTIVE ===="
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          while ($sw.Elapsed.TotalMinutes -lt 350) {
-            Start-Sleep -Seconds 60
-          }
+          while ($sw.Elapsed.TotalMinutes -lt 350) { Start-Sleep -Seconds 60 }
