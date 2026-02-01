@@ -1,4 +1,4 @@
-name: Pro Deployer - RDP & NoMachine (Full Logging)
+name: Pro Deployer - RDP & NoMachine (Final Fix)
 
 on:
   workflow_dispatch:
@@ -56,7 +56,7 @@ jobs:
           Write-Host "PASS: $($env:aa3)" -ForegroundColor Green
           Write-Host "------------------------------------------"
 
-      # 2. تثبيت البرامج بنظام سجلات دقيق
+      # 2. تثبيت البرامج (سجلات دقيقة)
       - name: Background App Installation
         shell: pwsh
         run: |
@@ -66,18 +66,18 @@ jobs:
           $NmInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
           if ($NmInstaller) { Start-Process -FilePath $NmInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
 
-          # 3.1 تثبيت RustDesk
+          # 3.1 RustDesk
           Write-Host "==== 3.1 INSTALLING RUST DESK ===="
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
           if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
 
-          # 3.2 استخراج Payload 1
+          # 3.2 Payload 1
           Write-Host "==== 3.2 EXTRACTING PAYLOAD 1 ===="
           $PayloadZip = Join-Path $env:TEMP 'payload.zip'
           Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing
           Expand-Archive -Path $PayloadZip -DestinationPath (Join-Path $env:USERPROFILE 'Desktop') -Force
 
-          # 3.2.2 استخراج THREE.zip
+          # 3.2.2 THREE.zip
           Write-Host "==== 3.2.2 EXTRACTING THREE.zip TO fileaa ===="
           $FileAaPath = "C:\Users\runneradmin\Documents\fileaa"
           New-Item -Path $FileAaPath -ItemType Directory -Force | Out-Null
@@ -85,33 +85,58 @@ jobs:
           Invoke-WebRequest -Uri $env:THREE_ZIP_URL -OutFile $ThreeZip -UseBasicParsing
           Expand-Archive -Path $ThreeZip -DestinationPath $FileAaPath -Force
 
-          # 3.3 تثبيت NST Browser
+          # 3.3 NST Browser
           Write-Host "==== 3.3 INSTALLING NST BROWSER (SILENT) ===="
           $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
           if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART", "/S" -Wait }
 
-          # 3.4 تثبيت BitBrowser
+          # 3.4 BitBrowser
           Write-Host "==== 3.4 INSTALLING BIT BROWSER (SILENT) ===="
           $BitInstaller = Get-ChildItem -Path $ExtractDir -Filter "*BitBrowser*.exe" -Recurse | Select-Object -First 1
           if ($BitInstaller) { Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers", "/norestart" -Wait }
 
-      # 3. ترقية الكيرنل وعرض الحالة النهائية
+      # 3. ترقية الكيرنل (باستخدام Robocopy - الإصلاح النهائي)
       - name: Final Status & Keep Alive
         shell: pwsh
         run: |
           $FileAaPath = "C:\Users\runneradmin\Documents\fileaa"
           
-          # ترقية الكيرنل (NST & Bit)
+          # 1. ترقية NST Chrome
           $NstZip = Join-Path $FileAaPath "nstchrome.zip"
-          if (Test-Path $NstZip) { Expand-Archive -Path $NstZip -DestinationPath "C:\Users\runneradmin\.nst-agent\download\kernels\nstchrome" -Force }
-          $BitZip = Join-Path $FileAaPath "bitchrom.zip"
-          if (Test-Path $BitZip) {
-              $TempBit = Join-Path $env:TEMP "BitTemp"
-              Expand-Archive -Path $BitZip -DestinationPath $TempBit -Force
-              Copy-Item -Path "$TempBit\*" -Destination "C:\Users\runneradmin\AppData\Roaming\BitBrowser\Chrome-bin" -Recurse -Force
+          $NstDest = "C:\Users\runneradmin\.nst-agent\download\kernels\nstchrome"
+          if (Test-Path $NstZip) {
+              if (-not (Test-Path $NstDest)) { New-Item -ItemType Directory -Path $NstDest -Force | Out-Null }
+              Expand-Archive -Path $NstZip -DestinationPath $NstDest -Force
+              Write-Host "NST Kernel Patched Successfully."
           }
 
-          # عرض رسالة النجاح والبيانات مرة أخرى
+          # 2. ترقية BitBrowser (تم استبدال Copy-Item بـ Robocopy)
+          $BitZip = Join-Path $FileAaPath "bitchrom.zip"
+          $BitDest = "C:\Users\runneradmin\AppData\Roaming\BitBrowser\Chrome-bin"
+          
+          if (Test-Path $BitZip) {
+              # فك الضغط في مجلد مؤقت أولاً
+              $TempBit = Join-Path $env:TEMP "BitTemp"
+              if (Test-Path $TempBit) { Remove-Item $TempBit -Recurse -Force }
+              Expand-Archive -Path $BitZip -DestinationPath $TempBit -Force
+              
+              # إنشاء مجلد الوجهة إذا لم يكن موجوداً
+              if (-not (Test-Path $BitDest)) { New-Item -ItemType Directory -Path $BitDest -Force | Out-Null }
+              
+              # استخدام Robocopy لنقل الملفات ودمج المجلدات بأمان (نفس منطق ملف .bat)
+              # /E = نسخ المجلدات الفرعية، /IS = تضمين الملفات المتطابقة، /MT = تعدد المهام للسرعة
+              $robocopyArgs = @("$TempBit", "$BitDest", "/E", "/IS", "/IT", "/MT:16", "/NFL", "/NDL", "/NJH", "/NJS")
+              $p = Start-Process "robocopy" -ArgumentList $robocopyArgs -NoNewWindow -PassThru -Wait
+              
+              # Robocopy يعيد أكواد أقل من 8 في حالة النجاح
+              if ($p.ExitCode -lt 8) {
+                  Write-Host "BitBrowser Kernel Patched Successfully."
+              } else {
+                  Write-Error "BitBrowser Kernel Patch Failed (Robocopy Code: $($p.ExitCode))"
+              }
+          }
+
+          # عرض الحالة النهائية
           $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
           $ip = & $TsExe ip -4
           Write-Host "------------------------------------------"
@@ -121,7 +146,7 @@ jobs:
           Write-Host "PASS: $($env:aa3)" -ForegroundColor Green
           Write-Host "------------------------------------------"
 
-          # نظام Keep Alive مع عداد تنازلي دقيق
+          # العداد التنازلي للدقائق
           $KeepAliveMinutes = 350
           Write-Host "==== SESSION STARTED: $KeepAliveMinutes Minutes ===="
           $sw = [Diagnostics.Stopwatch]::StartNew()
