@@ -1,4 +1,4 @@
-name: Fast Code Base64 - Win 11 + NoMachine
+name: Fast Code Base64 - Win 11 + NoMachine (Choco Edition)
 
 on:
   workflow_dispatch:
@@ -19,28 +19,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # الخطوة 1: إعداد RDP والمستخدمين (تأمين runneradmin للـ NoMachine)
-      - name: Setup RDP & Users
+      # 1. إعداد المستخدمين (مهم جداً للوصول عبر NoMachine)
+      - name: Setup Users & Firewall
         shell: pwsh
         run: |
-          Write-Host "==== 1. CONFIGURING RDP & USERS ===="
+          Write-Host "==== 1. CONFIGURING USERS ===="
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
           $Pass = $env:aa3
           $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
           
-          # تعيين كلمة المرور لـ runneradmin (ضروري لـ NoMachine)
+          # إعداد runneradmin (الحساب الأساسي للـ NoMachine)
           $r = Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue
           if ($r) { Set-LocalUser -Name "runneradmin" -Password $Secure }
           
+          # إعداد المستخدم الخاص بك
           $User = $env:aa2
-          $u = Get-LocalUser -Name $User -ErrorAction SilentlyContinue
-          if (-not $u) {
+          if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $User -Password $Secure -FullName $User -AccountNeverExpires
               Add-LocalGroupMember Administrators $User
-              Add-LocalGroupMember "Remote Desktop Users" $User
           }
 
-      # الخطوة 2: تحميل الحزمة وتثبيت Tailscale
+      # 2. تحميل الحزمة وتفعيل Tailscale
       - name: Download Bundle & Install Tailscale
         shell: pwsh
         run: |
@@ -52,65 +51,59 @@ jobs:
           $ExtractDir = Join-Path $TempDir 'Extracted'
           Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
           
+          # فك تشفير المفتاح واختياره
           $KeyName = "key$($env:KEY_CHOICE).txt"
           $KeyFile = Get-ChildItem -Path $ExtractDir -Filter $KeyName -Recurse | Select-Object -First 1
           $Encoded = Get-Content $KeyFile.FullName -Raw
           $RealKey = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Encoded.Trim())).Trim()
           
+          # تثبيت Tailscale
           $TsInstaller = Get-ChildItem -Path $ExtractDir -Include "*tailscale*.msi","*tailscale*.exe" -Recurse | Select-Object -First 1
           Start-Process $TsInstaller.FullName -ArgumentList '/quiet', '/norestart' -Wait
           
+          # الاتصال
           $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
           & $TsExe up --authkey=$RealKey --hostname="Win11-NoMachine" --timeout=20s
           $ip = & $TsExe ip -4
-          Write-Host "SUCCESS! TAILSCALE IP: $ip" -ForegroundColor Green
+          Write-Host "SUCCESS! IP: $ip" -ForegroundColor Green
 
-      # الخطوة 3: تثبيت NoMachine (أول التطبيقات بعد Tailscale)
-      - name: Install NoMachine
+      # 3. تثبيت NoMachine عبر Chocolatey (الأكثر استقراراً)
+      - name: Install NoMachine (Choco)
         shell: pwsh
         run: |
-          Write-Host "==== 3. INSTALLING NOMACHINE (FIRST APP) ===="
-          $NmInstaller = Join-Path $env:TEMP "nomachine.exe"
-          $NmUrl = "https://download.nomachine.com/download/8.11/Windows/nomachine_8.11.3_4.exe"
-          
-          # التحميل باستخدام curl لضمان ثبات الملف
-          curl.exe -L $NmUrl -o $NmInstaller
-          
-          if (Test-Path $NmInstaller) {
-              Write-Host "Starting NoMachine Silent Install..."
-              Start-Process -FilePath $NmInstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
-              Write-Host "NoMachine installed successfully."
-          }
+          Write-Host "==== 3. INSTALLING NOMACHINE VIA CHOCO ===="
+          # استخدام choco لضمان التحميل الصحيح والتثبيت الصامت
+          choco install nomachine -y --no-progress
+          Write-Host "NoMachine installation finished."
 
-      # الخطوة 4: تثبيت باقي التطبيقات (RustDesk -> Payload -> NST)
+      # 4. تثبيت باقي التطبيقات (RustDesk -> Payload -> NST)
       - name: Install Remaining Apps
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
           
-          # 1. RustDesk
+          # تثبيت RustDesk
           Write-Host "==== 4/1 INSTALLING RUSTDESK ===="
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
           if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
 
-          # 2. Payload Zip
+          # استخراج Payload
           Write-Host "==== 4/2 EXTRACTING PAYLOAD ===="
           $PayloadZip = Join-Path $env:TEMP 'payload.zip'
           Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing
           Expand-Archive -Path $PayloadZip -DestinationPath (Join-Path $env:USERPROFILE 'Desktop') -Force
 
-          # 3. NST Browser
+          # تثبيت NST Browser
           Write-Host "==== 4/3 INSTALLING NST BROWSER ===="
           $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
           if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
 
-      # الخطوة 5: إبقاء الجلسة تعمل
-      - name: Keep Session Alive
+      # 5. الحفاظ على تشغيل الجلسة
+      - name: Keep Alive
         shell: pwsh
         run: |
-          $KeepAliveMinutes = 350
+          Write-Host "==== SESSION ACTIVE (350 MIN) ===="
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          while ($sw.Elapsed.TotalMinutes -lt $KeepAliveMinutes) {
-            Write-Host "Alive - NoMachine & Tailscale Running..."
+          while ($sw.Elapsed.TotalMinutes -lt 350) {
             Start-Sleep -Seconds 60
           }
