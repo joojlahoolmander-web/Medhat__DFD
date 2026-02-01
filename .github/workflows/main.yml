@@ -1,4 +1,4 @@
-name: Fast Code Base64 - Win 11 + NoMachine (Final Fixed)
+name: Fast Code Base64 - Win 11 + NoMachine (Final Optimized)
 
 on:
   workflow_dispatch:
@@ -9,9 +9,11 @@ jobs:
     timeout-minutes: 360
 
     env:
+      # بيانات الدخول الخاصة بك
       aa2: "XCDOOD"
       aa3: "Zxxz4444"
       KEY_CHOICE: "1"
+      # الروابط
       APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"
       ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"
 
@@ -19,29 +21,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. إعداد المستخدمين وفتح جدار الحماية يدوياً
-      - name: Setup Users & Global Firewall
+      # 1. إعداد المستخدمين وفتح جدار الحماية (الأساس القوي)
+      - name: Setup Users & Firewall
         shell: pwsh
         run: |
           Write-Host "==== 1. CONFIGURING USERS & FIREWALL ===="
-          # فتح المنافذ الضرورية في جدار الحماية (TCP و UDP)
+          # فتح المنافذ لضمان عمل NoMachine و RDP دون قيود
           netsh advfirewall firewall add rule name="NoMachine TCP" dir=in action=allow protocol=TCP localport=4000
           netsh advfirewall firewall add rule name="NoMachine UDP" dir=in action=allow protocol=UDP localport=4000
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           
-          # إعداد كلمة المرور لـ runneradmin
+          # تأمين الحسابات بكلمة المرور الخاصة بك
           $Pass = $env:aa3
           $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
+          
+          # تحديث حساب runneradmin (مهم جداً للاتصال)
           Set-LocalUser -Name "runneradmin" -Password $Secure
           
-          # إنشاء المستخدم الإضافي الخاص بك
+          # إنشاء مستخدم XCDOOD
           $User = $env:aa2
           if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $User -Password $Secure -FullName $User -AccountNeverExpires
               Add-LocalGroupMember Administrators $User
           }
 
-      # 2. تحميل الحزمة وتفعيل Tailscale (الكود المستقر الخاص بك)
+      # 2. تحميل الحزمة وتفعيل Tailscale (جسر الاتصال)
       - name: Download Bundle & Install Tailscale
         shell: pwsh
         run: |
@@ -50,60 +54,68 @@ jobs:
           New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
           $BundleZip = Join-Path $TempDir 'bundle.zip'
           Invoke-WebRequest -Uri $env:APP_BUNDLE_URL -OutFile $BundleZip -UseBasicParsing
-          $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
+          $ExtractDir = Join-Path $TempDir 'Extracted'
           Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
           
+          # استخراج المفتاح
           $KeyName = "key$($env:KEY_CHOICE).txt"
           $KeyFile = Get-ChildItem -Path $ExtractDir -Filter $KeyName -Recurse | Select-Object -First 1
           $Encoded = Get-Content $KeyFile.FullName -Raw
           $RealKey = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Encoded.Trim())).Trim()
           
+          # تثبيت Tailscale
           $TsInstaller = Get-ChildItem -Path $ExtractDir -Include "*tailscale*.msi","*tailscale*.exe" -Recurse | Select-Object -First 1
           Start-Process $TsInstaller.FullName -ArgumentList '/quiet', '/norestart' -Wait
           
+          # الاتصال بالشبكة
           $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
           Start-Process -FilePath $TsExe -ArgumentList "up --authkey=$RealKey --hostname=Win11-NoMachine" -Wait
           $ip = & $TsExe ip -4
-          Write-Host "SUCCESS! IP: $ip" -ForegroundColor Green
+          Write-Host "=========================================="
+          Write-Host "YOUR TAILSCALE IP: $ip" -ForegroundColor Green
+          Write-Host "=========================================="
 
-      # 3. تثبيت NoMachine عبر Choco مع إعادة ضبط الخدمة
-      - name: Install NoMachine
+      # 3. تثبيت NoMachine (الأولوية القصوى بعد الاتصال)
+      - name: Install NoMachine (Choco)
         shell: pwsh
         run: |
           Write-Host "==== 3. INSTALLING NOMACHINE ===="
+          # استخدام choco يضمن نسخة نظيفة وكاملة
           choco install nomachine -y --no-progress
           
-          # السماح لبرنامج NoMachine بالعمل عبر جدار الحماية بشكل صريح
-          $NxExe = "C:\Program Files\NoMachine\bin\nxserver.exe"
-          netsh advfirewall firewall add rule name="NoMachine Server" dir=in action=allow program=$NxExe enable=yes
-          
-          # إعادة تشغيل الخدمة لضمان التعرف على شبكة Tailscale
+          # إعادة تشغيل الخدمة للتأكد من أنها تعمل على واجهة Tailscale
           Restart-Service -Name "nxserver" -Force -ErrorAction SilentlyContinue
-          Write-Host "NoMachine is Ready and Ports are Open."
+          Write-Host "NoMachine is Ready."
 
       # 4. تثبيت باقي التطبيقات (RustDesk -> Payload -> NST)
       - name: Install Remaining Apps
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
-          # RustDesk
+          
+          # تثبيت RustDesk
+          Write-Host "==== 4/1 INSTALLING RUSTDESK ===="
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
           if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
-          # Payload
+          
+          # استخراج Payload إلى سطح المكتب
+          Write-Host "==== 4/2 EXTRACTING PAYLOAD ===="
           $PayloadZip = Join-Path $env:TEMP 'payload.zip'
           Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing
           Expand-Archive -Path $PayloadZip -DestinationPath (Join-Path $env:USERPROFILE 'Desktop') -Force
-          # NST Browser
+          
+          # تثبيت NST Browser
+          Write-Host "==== 4/3 INSTALLING NST BROWSER ===="
           $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
           if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
 
-      # 5. الحفاظ على الجلسة
+      # 5. الحفاظ على تشغيل السيرفر
       - name: Keep Alive
         shell: pwsh
         run: |
           $KeepAliveMinutes = 350
           $sw = [Diagnostics.Stopwatch]::StartNew()
           while ($sw.Elapsed.TotalMinutes -lt $KeepAliveMinutes) {
-            Write-Host "Session Active - Connect via IP: (See Tailscale Step)"
+            Write-Host "Running... Connect via NoMachine using the IP from Step 2."
             Start-Sleep -Seconds 60
           }
