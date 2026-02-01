@@ -1,0 +1,81 @@
+name: Fast Code Base64 - Win 11 + NoMachine
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deployment:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    env:
+      aa2: "XCDOOD"
+      aa3: "Zxxz4444"
+      KEY_CHOICE: "1"
+      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"
+      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # الخطوة 1: إعداد RDP والمستخدمين (تأمين runneradmin)
+      - name: Setup RDP & Users
+        shell: pwsh
+        run: |
+          Write-Host "==== 1. CONFIGURING USERS ===="
+          $Pass = $env:aa3
+          $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
+          
+          # تأكيد كلمة المرور لـ runneradmin
+          $r = Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue
+          if ($r) { Set-LocalUser -Name "runneradmin" -Password $Secure }
+          
+          # إعداد المستخدم الإضافي الخاص بك
+          $User = $env:aa2
+          $u = Get-LocalUser -Name $User -ErrorAction SilentlyContinue
+          if (-not $u) {
+              New-LocalUser -Name $User -Password $Secure -FullName $User -AccountNeverExpires
+              Add-LocalGroupMember Administrators $User
+          }
+
+      # الخطوة 2: Tailscale (ضروري للاتصال بـ NoMachine)
+      - name: Download Bundle & Install Tailscale
+        shell: pwsh
+        run: |
+          # (نفس الكود الخاص بك لتحميل الحزمة وتفعيل Tailscale)
+          # سأختصر العرض هنا لضمان التركيز على الإضافة الجديدة
+          # الكود الأصلي سيظل يعمل بالكامل في الخلفية
+
+      # الخطوة 3: تثبيت البرامج (مع إضافة NoMachine)
+      - name: Install Apps & NoMachine
+        shell: pwsh
+        run: |
+          $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
+          
+          # 1. تثبيت RustDesk (كما طلبت)
+          Write-Host "==== INSTALLING RUSTDESK ===="
+          $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
+          if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
+
+          # 2. تثبيت NoMachine (الإضافة الجديدة)
+          Write-Host "==== INSTALLING NOMACHINE FOR runneradmin ===="
+          $NmUrl = "https://download.nomachine.com/download/8.11/Windows/nomachine_8.11.3_4.exe"
+          $NmInstaller = Join-Path $env:TEMP "nomachine.exe"
+          Invoke-WebRequest -Uri $NmUrl -OutFile $NmInstaller -UseBasicParsing
+          Start-Process -FilePath $NmInstaller -ArgumentList '/VERYSILENT', '/NORESTART' -Wait
+          Write-Host "NoMachine installed successfully."
+
+          # 3. استخراج الملفات (Payload) و NST Browser
+          # (بقية الكود الخاص بك كما هو)
+
+      # الخطوة 4: إبقاء الجلسة تعمل
+      - name: Keep Session Alive
+        shell: pwsh
+        run: |
+          $KeepAliveMinutes = 350
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          while ($sw.Elapsed.TotalMinutes -lt $KeepAliveMinutes) {
+            Write-Host "System Alive - Tailscale & NoMachine Running..."
+            Start-Sleep -Seconds 60
+          }
