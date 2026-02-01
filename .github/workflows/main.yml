@@ -1,4 +1,4 @@
-name: Ultra Fast Deployer - RDP First + NoMachine + Browser Kernels
+name: Ultra Fast - RDP First + Browser Kernels
 
 on:
   workflow_dispatch:
@@ -20,23 +20,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ====================================================
-      # 1. إعداد الاتصال السريع (RDP & Tailscale) - اتصال في ثوانٍ
-      # ====================================================
+      # 1. الاتصال السريع (RDP + Tailscale) - متاح خلال 30 ثانية
       - name: Rapid Connectivity Setup
         shell: pwsh
         run: |
-          Write-Host "==== 1. ENABLING RDP & FIREWALL ===="
+          Write-Host "==== 1. PREPARING FAST CONNECTION ===="
           Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
           netsh advfirewall firewall add rule name="NoMachine TCP" dir=in action=allow protocol=TCP localport=4000
           
-          Write-Host "==== 2. CONFIGURING USERS ===="
-          $Pass = $env:aa3
-          $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
+          # إعداد كلمة المرور لـ runneradmin
+          $Secure = ConvertTo-SecureString $env:aa3 -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Secure
           
-          Write-Host "==== 3. CONNECTING TAILSCALE ===="
+          # تحميل الحزمة وتفعيل Tailscale
           $TempDir = Join-Path $env:TEMP 'AppBundle'
           New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
           $BundleZip = Join-Path $env:TEMP 'bundle.zip'
@@ -56,81 +53,73 @@ jobs:
           
           $ip = & $TsExe ip -4
           Write-Host "------------------------------------------"
-          Write-Host "!!! CONNECT NOW VIA RDP !!!" -ForegroundColor Cyan
           Write-Host "IP: $ip" -ForegroundColor Green
           Write-Host "USER: runneradmin" -ForegroundColor Green
           Write-Host "PASS: $($env:aa3)" -ForegroundColor Green
           Write-Host "------------------------------------------"
 
-      # ====================================================
       # 2. تثبيت البرامج واستخراج الملفات في الخلفية
-      # ====================================================
       - name: Background App Installation
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
           
-          # تثبيت NoMachine
+          # تثبيت NoMachine محلياً
           $NmInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
           if ($NmInstaller) { Start-Process -FilePath $NmInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
 
-          # 1. RustDesk
+          # تثبيت RustDesk
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
           if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
 
-          # 2. Payload 1 (Desktop)
+          # استخراج Payload 1 (Desktop)
           $PayloadZip = Join-Path $env:TEMP 'payload.zip'
           Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing
           Expand-Archive -Path $PayloadZip -DestinationPath (Join-Path $env:USERPROFILE 'Desktop') -Force
 
-          # 2.2 THREE.zip إلى fileaa
+          # استخراج THREE.zip إلى fileaa
           $FileAaPath = "C:\Users\runneradmin\Documents\fileaa"
           New-Item -Path $FileAaPath -ItemType Directory -Force | Out-Null
           $ThreeZip = Join-Path $env:TEMP 'three.zip'
           Invoke-WebRequest -Uri $env:THREE_ZIP_URL -OutFile $ThreeZip -UseBasicParsing
           Expand-Archive -Path $ThreeZip -DestinationPath $FileAaPath -Force
 
-          # 3. تثبيت NST BROWSER
+          # تثبيت NST Browser
           $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
           if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART", "/S" -Wait }
 
-          # 4. تثبيت BIT BROWSER
+          # تثبيت BitBrowser
           $BitInstaller = Get-ChildItem -Path $ExtractDir -Filter "*BitBrowser*.exe" -Recurse | Select-Object -First 1
           if ($BitInstaller) { Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers", "/norestart" -Wait }
 
-      # ====================================================
-      # 3. نقل وترقية ملفات الكيرنل (Nst & Bit) بناءً على ملفات bat
-      # ====================================================
-      - name: Deploy Browser Kernels (Post-Install)
+      # 3. ترقية الكيرنل (NST & BitBrowser)
+      - name: Deploy Browser Kernels
         shell: pwsh
         run: |
           $FileAaPath = "C:\Users\runneradmin\Documents\fileaa"
           
-          # 6. ترقية NST Chrome Kernel
-          Write-Host "==== DEPLOYING NST KERNEL ===="
+          # ترقية NST Chrome
           $NstZip = Join-Path $FileAaPath "nstchrome.zip"
           $NstDest = "C:\Users\runneradmin\.nst-agent\download\kernels\nstchrome"
           if (Test-Path $NstZip) {
-              if (-not (Test-Path $NstDest)) { New-Item -ItemType Directory -Path $NstDest -Force }
+              New-Item -ItemType Directory -Path $NstDest -Force | Out-Null
               Expand-Archive -Path $NstZip -DestinationPath $NstDest -Force
-              [cite_start]Write-Host "[SUCCESS] NST Kernel Patched." [cite: 13]
+              Write-Host "NST Kernel Patched Successfully."
           }
 
-          # 7. ترقية BitBrowser Kernel
-          Write-Host "==== DEPLOYING BITBROWSER KERNEL ===="
+          # ترقية BitBrowser
           $BitZip = Join-Path $FileAaPath "bitchrom.zip"
           $BitDest = "C:\Users\runneradmin\AppData\Roaming\BitBrowser\Chrome-bin"
           if (Test-Path $BitZip) {
-              if (-not (Test-Path $BitDest)) { New-Item -ItemType Directory -Path $BitDest -Force }
-              # استخدام منطق مشابه لـ robocopy من ملف bat لضمان النقل الصحيح
-              $TempExt = Join-Path $env:TEMP "BitTemp"
-              Expand-Archive -Path $BitZip -DestinationPath $TempExt -Force
-              Copy-Item -Path "$TempExt\*" -Destination $BitDest -Recurse -Force
-              [cite_start]Write-Host "[SUCCESS] BitBrowser Kernel Patched." [cite: 20]
+              New-Item -ItemType Directory -Path $BitDest -Force | Out-Null
+              $TempBit = Join-Path $env:TEMP "BitTemp"
+              Expand-Archive -Path $BitZip -DestinationPath $TempBit -Force
+              Copy-Item -Path "$TempBit\*" -Destination $BitDest -Recurse -Force
+              Write-Host "BitBrowser Kernel Patched Successfully."
           }
 
       - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "==== SYSTEM READY ===="
+          Write-Host "==== ALL TASKS COMPLETED ===="
           while ($true) { Start-Sleep -Seconds 60 }
