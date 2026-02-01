@@ -1,4 +1,4 @@
-name: Fast Code Base64 - Win 11 + Pro Connectivity
+name: Pro Deployer - Win 11 + NoMachine + BitBrowser
 
 on:
   workflow_dispatch:
@@ -15,51 +15,49 @@ jobs:
       KEY_CHOICE: "1"
       
       # الروابط الخاصة بك
-      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s" # الحزمة الكبيرة
-      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45" # الملفات المهمة 1
-      THREE_ZIP_URL: "https://tinyurl.com/threefilezip227" # الملفات المهمة 2 (THREE.zip)
+      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"      # الحزمة التي تحتوي على (Tailscale, NoMachine, Rust, NST, Bit)
+      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"   # Payload 1
+      THREE_ZIP_URL: "https://tinyurl.com/threefilezip227" # Payload 2 (THREE.zip)
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ====================================================
-      # الخطوة 1: إعدادات النظام وجدار الحماية والمستخدمين
+      # 1. إعداد النظام وجدار الحماية والمستخدمين
       # ====================================================
       - name: Setup System & Firewall Settings
         shell: pwsh
         run: |
           Write-Host "==== 1. CONFIGURING SYSTEM & USERS ===="
-          
-          # إعداد كلمة مرور المستخدم الأساسي runneradmin
           $Pass = $env:aa3
           $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
+          
+          # إعداد مستخدم runneradmin والكلمة السرية
           Set-LocalUser -Name "runneradmin" -Password $Secure
           
-          # إنشاء مستخدم إضافي وتفعيله
+          # إنشاء مستخدم إضافي XCDOOD
           $User = $env:aa2
           if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $User -Password $Secure -FullName $User -AccountNeverExpires
               Add-LocalGroupMember Administrators $User
           }
 
-          # السماح لبرنامج NoMachine بالعمل عبر جدار الحماية بشكل صريح (TCP & UDP)
+          # السماح لبرنامج NoMachine بالعمل عبر جدار الحماية بشكل صريح
+          # هذه الأوامر تضمن مرور البيانات عبر المنفذ 4000 دون حظر من الويندوز
           netsh advfirewall firewall add rule name="NoMachine TCP" dir=in action=allow protocol=TCP localport=4000
           netsh advfirewall firewall add rule name="NoMachine UDP" dir=in action=allow protocol=UDP localport=4000
-          
-          # السماح بـ RDP كخيار احتياطي
-          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP Port" dir=in action=allow protocol=TCP localport=3389
+          netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
 
       # ====================================================
-      # الخطوة 2: أدوات الاتصال الأساسية (Tailscale & NoMachine)
+      # 2. أدوات الاتصال (تثبيت محلي لـ NoMachine + Tailscale)
       # ====================================================
-      - name: Install Connectivity Tools (Tailscale & NoMachine)
+      - name: Install Connectivity Tools
         shell: pwsh
         run: |
-          Write-Host "==== 2. INSTALLING CONNECTIVITY TOOLS ===="
+          Write-Host "==== 2. INSTALLING CONNECTIVITY TOOLS FROM BUNDLE ===="
           
-          # تحميل وفك حزمة البرامج
+          # تحميل وفك حزمة البرامج الأساسية
           $TempDir = Join-Path $env:TEMP 'AppBundle'
           New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
           $BundleZip = Join-Path $TempDir 'bundle.zip'
@@ -67,75 +65,89 @@ jobs:
           $ExtractDir = Join-Path $TempDir 'Extracted'
           Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
 
-          # تثبيت NoMachine عبر Chocolatey لضمان الاستقرار
-          choco install nomachine -y --no-progress
-          Restart-Service -Name "nxserver" -Force -ErrorAction SilentlyContinue
+          # تثبيت NoMachine من الملف الموجود في الحزمة (بدلاً من التحميل من الإنترنت)
+          # يبحث الكود عن ملف يبدأ بكلمة nomachine وينتهي بـ .exe
+          $NmInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
+          if ($NmInstaller) {
+              Write-Host "Installing NoMachine from local bundle..."
+              Start-Process -FilePath $NmInstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          }
 
-          # فك تشفير مفتاح Tailscale وتثبيته
+          # إعداد Tailscale
           $KeyName = "key$($env:KEY_CHOICE).txt"
           $KeyFile = Get-ChildItem -Path $ExtractDir -Filter $KeyName -Recurse | Select-Object -First 1
           $Encoded = Get-Content $KeyFile.FullName -Raw
           $RealKey = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Encoded.Trim())).Trim()
           
           $TsInstaller = Get-ChildItem -Path $ExtractDir -Include "*tailscale*.msi","*tailscale*.exe" -Recurse | Select-Object -First 1
-          Start-Process msiexec.exe -ArgumentList '/i', $TsInstaller.FullName, '/quiet', '/norestart' -Wait
+          if ($TsInstaller.Extension -eq ".msi") {
+              Start-Process msiexec.exe -ArgumentList '/i', $TsInstaller.FullName, '/quiet', '/norestart' -Wait
+          } else {
+              Start-Process $TsInstaller.FullName -ArgumentList '/quiet', '/norestart' -Wait
+          }
           
-          # ربط السيرفر بشبكة Tailscale
+          # الاتصال بشبكة Tailscale
           $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
           Start-Process -FilePath $TsExe -ArgumentList "up --authkey=$RealKey --hostname=Win11-NoMachine" -Wait
           
-          # طباعة البيانات المطلوبة في الـ LOG بوضوح
+          # طباعة بيانات الاتصال في الـ Log لتكون واضحة
           $ip = & $TsExe ip -4
-          Write-Host "------------------------------------------" -ForegroundColor Cyan
+          Write-Host "------------------------------------------"
           Write-Host "IP: $ip" -ForegroundColor Green
           Write-Host "USER: runneradmin" -ForegroundColor Green
           Write-Host "PASS: $($env:aa3)" -ForegroundColor Green
-          Write-Host "------------------------------------------" -ForegroundColor Cyan
+          Write-Host "------------------------------------------"
 
       # ====================================================
-      # الخطوة 3: تثبيت البرامج بالترتيب المطلوب
+      # 3. تثبيت البرامج بالترتيب المطلوب (تثبيت صامت بالكامل)
       # ====================================================
-      - name: Install Apps in Specific Order
+      - name: Silent Install Apps
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
           
-          # 1- تثبيت RUST DESK
+          # 1. تثبيت RUST DESK
           Write-Host "==== 3.1 INSTALLING RUST DESK ===="
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
           if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
 
-          # 2- تحميل واستخراج ملفات Payload 1 إلى سطح المكتب
+          # 2. استخراج Payload 1 (Desktop)
           Write-Host "==== 3.2 EXTRACTING PAYLOAD 1 ===="
           $PayloadZip = Join-Path $env:TEMP 'payload.zip'
           Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing
           Expand-Archive -Path $PayloadZip -DestinationPath (Join-Path $env:USERPROFILE 'Desktop') -Force
 
-          # 2.2- تحميل واستخراج THREE.zip إلى Documents\fileaa
-          Write-Host "==== 3.2.2 EXTRACTING THREE.zip (Payload 2) ===="
+          # 2.2 استخراج THREE.zip إلى Documents\fileaa
+          Write-Host "==== 3.2.2 EXTRACTING THREE.zip TO fileaa ===="
           $FileAaPath = "C:\Users\runneradmin\Documents\fileaa"
-          New-Item -ItemType Directory -Path $FileAaPath -Force | Out-Null
+          New-Item -Path $FileAaPath -ItemType Directory -Force | Out-Null
           $ThreeZip = Join-Path $env:TEMP 'three.zip'
           Invoke-WebRequest -Uri $env:THREE_ZIP_URL -OutFile $ThreeZip -UseBasicParsing
           Expand-Archive -Path $ThreeZip -DestinationPath $FileAaPath -Force
 
-          # 3- تثبيت NST BROWSER
-          Write-Host "==== 3.3 INSTALLING NST BROWSER ===="
+          # 3. تثبيت NST BROWSER (تثبيت صامت بالكامل)
+          Write-Host "==== 3.3 INSTALLING NST BROWSER (SILENT) ===="
           $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
-          if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
+          if ($NstInstaller) {
+              # تم استخدام بارامترات التثبيت الصامت لـ NST
+              Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/S" -Wait
+          }
 
-          # 4- تثبيت BIT BROWSER
-          Write-Host "==== 3.4 INSTALLING BIT BROWSER ===="
+          # 4. تثبيت BIT BROWSER (تثبيت صامت بالكامل)
+          Write-Host "==== 3.4 INSTALLING BIT BROWSER (SILENT) ===="
           $BitInstaller = Get-ChildItem -Path $ExtractDir -Filter "*BitBrowser*.exe" -Recurse | Select-Object -First 1
-          if ($BitInstaller) { Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
+          if ($BitInstaller) {
+              # تم استخدام بارامترات التثبيت الصامت لـ BitBrowser بناءً على كود الـ bat
+              Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers", "/norestart" -Wait
+          }
 
       # ====================================================
-      # الخطوة 4: الحفاظ على استمرار الجلسة
+      # 4. الحفاظ على الجلسة
       # ====================================================
-      - name: Keep Alive Session
+      - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "==== SESSION ACTIVE (350 MIN) ===="
+          Write-Host "==== SESSION STARTED (350 MIN) ===="
           $sw = [Diagnostics.Stopwatch]::StartNew()
           while ($sw.Elapsed.TotalMinutes -lt 350) {
             Start-Sleep -Seconds 60
