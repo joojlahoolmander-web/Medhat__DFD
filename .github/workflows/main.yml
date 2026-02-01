@@ -1,4 +1,4 @@
-name: Pro Deployer - Win 11 + NoMachine + BitBrowser
+name: Ultra Fast Deployer - RDP First + NoMachine + Browser Kernels
 
 on:
   workflow_dispatch:
@@ -9,146 +9,128 @@ jobs:
     timeout-minutes: 360
 
     env:
-      # إعدادات المستخدم والبيانات الأساسية
       aa2: "XCDOOD"
       aa3: "Zxxz4444"
       KEY_CHOICE: "1"
-      
-      # الروابط الخاصة بك
-      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"      # الحزمة التي تحتوي على (Tailscale, NoMachine, Rust, NST, Bit)
-      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"   # Payload 1
-      THREE_ZIP_URL: "https://tinyurl.com/threefilezip227" # Payload 2 (THREE.zip)
+      APP_BUNDLE_URL: "https://tinyurl.com/appk5214s"
+      ZIP_URL: "https://tinyurl.com/filesdownlaodkkda45"
+      THREE_ZIP_URL: "https://tinyurl.com/threefilezip227"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ====================================================
-      # 1. إعداد النظام وجدار الحماية والمستخدمين
+      # 1. إعداد الاتصال السريع (RDP & Tailscale) - اتصال في ثوانٍ
       # ====================================================
-      - name: Setup System & Firewall Settings
+      - name: Rapid Connectivity Setup
         shell: pwsh
         run: |
-          Write-Host "==== 1. CONFIGURING SYSTEM & USERS ===="
+          Write-Host "==== 1. ENABLING RDP & FIREWALL ===="
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0 -Force
+          netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
+          netsh advfirewall firewall add rule name="NoMachine TCP" dir=in action=allow protocol=TCP localport=4000
+          
+          Write-Host "==== 2. CONFIGURING USERS ===="
           $Pass = $env:aa3
           $Secure = ConvertTo-SecureString $Pass -AsPlainText -Force
-          
-          # إعداد مستخدم runneradmin والكلمة السرية
           Set-LocalUser -Name "runneradmin" -Password $Secure
           
-          # إنشاء مستخدم إضافي XCDOOD
-          $User = $env:aa2
-          if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name $User -Password $Secure -FullName $User -AccountNeverExpires
-              Add-LocalGroupMember Administrators $User
-          }
-
-          # السماح لبرنامج NoMachine بالعمل عبر جدار الحماية بشكل صريح
-          # هذه الأوامر تضمن مرور البيانات عبر المنفذ 4000 دون حظر من الويندوز
-          netsh advfirewall firewall add rule name="NoMachine TCP" dir=in action=allow protocol=TCP localport=4000
-          netsh advfirewall firewall add rule name="NoMachine UDP" dir=in action=allow protocol=UDP localport=4000
-          netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
-
-      # ====================================================
-      # 2. أدوات الاتصال (تثبيت محلي لـ NoMachine + Tailscale)
-      # ====================================================
-      - name: Install Connectivity Tools
-        shell: pwsh
-        run: |
-          Write-Host "==== 2. INSTALLING CONNECTIVITY TOOLS FROM BUNDLE ===="
-          
-          # تحميل وفك حزمة البرامج الأساسية
+          Write-Host "==== 3. CONNECTING TAILSCALE ===="
           $TempDir = Join-Path $env:TEMP 'AppBundle'
           New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
-          $BundleZip = Join-Path $TempDir 'bundle.zip'
+          $BundleZip = Join-Path $env:TEMP 'bundle.zip'
           Invoke-WebRequest -Uri $env:APP_BUNDLE_URL -OutFile $BundleZip -UseBasicParsing
           $ExtractDir = Join-Path $TempDir 'Extracted'
           Expand-Archive -Path $BundleZip -DestinationPath $ExtractDir -Force
-
-          # تثبيت NoMachine من الملف الموجود في الحزمة (بدلاً من التحميل من الإنترنت)
-          # يبحث الكود عن ملف يبدأ بكلمة nomachine وينتهي بـ .exe
-          $NmInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
-          if ($NmInstaller) {
-              Write-Host "Installing NoMachine from local bundle..."
-              Start-Process -FilePath $NmInstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
-          }
-
-          # إعداد Tailscale
+          
           $KeyName = "key$($env:KEY_CHOICE).txt"
           $KeyFile = Get-ChildItem -Path $ExtractDir -Filter $KeyName -Recurse | Select-Object -First 1
-          $Encoded = Get-Content $KeyFile.FullName -Raw
-          $RealKey = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Encoded.Trim())).Trim()
+          $RealKey = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((Get-Content $KeyFile.FullName -Raw).Trim())).Trim()
           
           $TsInstaller = Get-ChildItem -Path $ExtractDir -Include "*tailscale*.msi","*tailscale*.exe" -Recurse | Select-Object -First 1
-          if ($TsInstaller.Extension -eq ".msi") {
-              Start-Process msiexec.exe -ArgumentList '/i', $TsInstaller.FullName, '/quiet', '/norestart' -Wait
-          } else {
-              Start-Process $TsInstaller.FullName -ArgumentList '/quiet', '/norestart' -Wait
-          }
+          Start-Process $TsInstaller.FullName -ArgumentList '/quiet', '/norestart' -Wait
           
-          # الاتصال بشبكة Tailscale
           $TsExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
-          Start-Process -FilePath $TsExe -ArgumentList "up --authkey=$RealKey --hostname=Win11-NoMachine" -Wait
+          Start-Process -FilePath $TsExe -ArgumentList "up --authkey=$RealKey --hostname=Win11-Fast" -Wait
           
-          # طباعة بيانات الاتصال في الـ Log لتكون واضحة
           $ip = & $TsExe ip -4
           Write-Host "------------------------------------------"
+          Write-Host "!!! CONNECT NOW VIA RDP !!!" -ForegroundColor Cyan
           Write-Host "IP: $ip" -ForegroundColor Green
           Write-Host "USER: runneradmin" -ForegroundColor Green
           Write-Host "PASS: $($env:aa3)" -ForegroundColor Green
           Write-Host "------------------------------------------"
 
       # ====================================================
-      # 3. تثبيت البرامج بالترتيب المطلوب (تثبيت صامت بالكامل)
+      # 2. تثبيت البرامج واستخراج الملفات في الخلفية
       # ====================================================
-      - name: Silent Install Apps
+      - name: Background App Installation
         shell: pwsh
         run: |
           $ExtractDir = Join-Path $env:TEMP 'AppBundle\Extracted'
           
-          # 1. تثبيت RUST DESK
-          Write-Host "==== 3.1 INSTALLING RUST DESK ===="
+          # تثبيت NoMachine
+          $NmInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nomachine*.exe" -Recurse | Select-Object -First 1
+          if ($NmInstaller) { Start-Process -FilePath $NmInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART" -Wait }
+
+          # 1. RustDesk
           $RustInstaller = Get-ChildItem -Path $ExtractDir -Filter "*rust*.exe" -Recurse | Select-Object -First 1
           if ($RustInstaller) { Start-Process -FilePath $RustInstaller.FullName -ArgumentList "--silent-install" -NoNewWindow }
 
-          # 2. استخراج Payload 1 (Desktop)
-          Write-Host "==== 3.2 EXTRACTING PAYLOAD 1 ===="
+          # 2. Payload 1 (Desktop)
           $PayloadZip = Join-Path $env:TEMP 'payload.zip'
           Invoke-WebRequest -Uri $env:ZIP_URL -OutFile $PayloadZip -UseBasicParsing
           Expand-Archive -Path $PayloadZip -DestinationPath (Join-Path $env:USERPROFILE 'Desktop') -Force
 
-          # 2.2 استخراج THREE.zip إلى Documents\fileaa
-          Write-Host "==== 3.2.2 EXTRACTING THREE.zip TO fileaa ===="
+          # 2.2 THREE.zip إلى fileaa
           $FileAaPath = "C:\Users\runneradmin\Documents\fileaa"
           New-Item -Path $FileAaPath -ItemType Directory -Force | Out-Null
           $ThreeZip = Join-Path $env:TEMP 'three.zip'
           Invoke-WebRequest -Uri $env:THREE_ZIP_URL -OutFile $ThreeZip -UseBasicParsing
           Expand-Archive -Path $ThreeZip -DestinationPath $FileAaPath -Force
 
-          # 3. تثبيت NST BROWSER (تثبيت صامت بالكامل)
-          Write-Host "==== 3.3 INSTALLING NST BROWSER (SILENT) ===="
+          # 3. تثبيت NST BROWSER
           $NstInstaller = Get-ChildItem -Path $ExtractDir -Filter "*nst*.exe" -Recurse | Select-Object -First 1
-          if ($NstInstaller) {
-              # تم استخدام بارامترات التثبيت الصامت لـ NST
-              Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/S" -Wait
-          }
+          if ($NstInstaller) { Start-Process -FilePath $NstInstaller.FullName -ArgumentList "/VERYSILENT", "/NORESTART", "/S" -Wait }
 
-          # 4. تثبيت BIT BROWSER (تثبيت صامت بالكامل)
-          Write-Host "==== 3.4 INSTALLING BIT BROWSER (SILENT) ===="
+          # 4. تثبيت BIT BROWSER
           $BitInstaller = Get-ChildItem -Path $ExtractDir -Filter "*BitBrowser*.exe" -Recurse | Select-Object -First 1
-          if ($BitInstaller) {
-              # تم استخدام بارامترات التثبيت الصامت لـ BitBrowser بناءً على كود الـ bat
-              Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers", "/norestart" -Wait
-          }
+          if ($BitInstaller) { Start-Process -FilePath $BitInstaller.FullName -ArgumentList "/S", "/allusers", "/norestart" -Wait }
 
       # ====================================================
-      # 4. الحفاظ على الجلسة
+      # 3. نقل وترقية ملفات الكيرنل (Nst & Bit) بناءً على ملفات bat
       # ====================================================
+      - name: Deploy Browser Kernels (Post-Install)
+        shell: pwsh
+        run: |
+          $FileAaPath = "C:\Users\runneradmin\Documents\fileaa"
+          
+          # 6. ترقية NST Chrome Kernel
+          Write-Host "==== DEPLOYING NST KERNEL ===="
+          $NstZip = Join-Path $FileAaPath "nstchrome.zip"
+          $NstDest = "C:\Users\runneradmin\.nst-agent\download\kernels\nstchrome"
+          if (Test-Path $NstZip) {
+              if (-not (Test-Path $NstDest)) { New-Item -ItemType Directory -Path $NstDest -Force }
+              Expand-Archive -Path $NstZip -DestinationPath $NstDest -Force
+              [cite_start]Write-Host "[SUCCESS] NST Kernel Patched." [cite: 13]
+          }
+
+          # 7. ترقية BitBrowser Kernel
+          Write-Host "==== DEPLOYING BITBROWSER KERNEL ===="
+          $BitZip = Join-Path $FileAaPath "bitchrom.zip"
+          $BitDest = "C:\Users\runneradmin\AppData\Roaming\BitBrowser\Chrome-bin"
+          if (Test-Path $BitZip) {
+              if (-not (Test-Path $BitDest)) { New-Item -ItemType Directory -Path $BitDest -Force }
+              # استخدام منطق مشابه لـ robocopy من ملف bat لضمان النقل الصحيح
+              $TempExt = Join-Path $env:TEMP "BitTemp"
+              Expand-Archive -Path $BitZip -DestinationPath $TempExt -Force
+              Copy-Item -Path "$TempExt\*" -Destination $BitDest -Recurse -Force
+              [cite_start]Write-Host "[SUCCESS] BitBrowser Kernel Patched." [cite: 20]
+          }
+
       - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "==== SESSION STARTED (350 MIN) ===="
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          while ($sw.Elapsed.TotalMinutes -lt 350) {
-            Start-Sleep -Seconds 60
-          }
+          Write-Host "==== SYSTEM READY ===="
+          while ($true) { Start-Sleep -Seconds 60 }
